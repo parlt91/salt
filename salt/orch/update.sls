@@ -41,6 +41,15 @@ update_modules:
     - require:
       - salt: update_modules
 
+# Perform any migratrions necessary before services are shutdown
+{{ master_id }}-pre-shutdown:
+  salt.state:
+    - tgt: {{ master_id }}
+    - sls:
+      - cni.update-pre-shutdown
+    - require:
+      - salt: {{ master_id }}-set-update-grain
+
 {{ master_id }}-clean-shutdown:
   salt.state:
     - tgt: {{ master_id }}
@@ -49,10 +58,18 @@ update_modules:
       - kube-controller-manager.stop
       - kube-scheduler.stop
       - docker.stop
-      - flannel.stop
       - etcd.stop
     - require:
-      - salt: {{ master_id }}-set-update-grain
+      - salt: {{ master_id }}-pre-shutdown
+
+# Perform any migratrions necessary before services are shutdown
+{{ master_id }}-pre-reboot:
+  salt.state:
+    - tgt: {{ master_id }}
+    - sls:
+      - cni.update-pre-reboot
+    - require:
+      - salt: {{ master_id }}-clean-shutdown
 
 # Reboot the node
 {{ master_id }}-reboot:
@@ -64,7 +81,7 @@ update_modules:
     - kwarg:
         bg: True
     - require:
-      - salt: {{ master_id }}-clean-shutdown
+      - salt: {{ master_id }}-pre-reboot
 
 # Wait for it to start again
 {{ master_id }}-wait-for-start:
@@ -84,7 +101,16 @@ update_modules:
     - require:
       - salt: {{ master_id }}-wait-for-start
 
-{{ master_id }}-update-reboot-needed-grain:
+# Perform any migratrions after services are started
+{{ master_id }}-post-start-services:
+  salt.state:
+    - tgt: {{ master_id }}
+    - sls:
+      - cni.update-post-start-services
+    - require:
+      - salt: {{ master_id }}-start-services
+
+{{ master_id }}-reboot-needed-grain:
   salt.function:
     - tgt: {{ master_id }}
     - name: grains.setval
@@ -92,7 +118,7 @@ update_modules:
       - tx_update_reboot_needed
       - false
     - require:
-      - salt: {{ master_id }}-start-services
+      - salt: {{ master_id }}-post-start-services
 
 # Ensure the node is marked as finished upgrading
 {{ master_id }}-remove-update-grain:
@@ -103,12 +129,12 @@ update_modules:
       - update_in_progress
       - false
     - require:
-      - salt: {{ master_id }}-update-reboot-needed-grain
+      - salt: {{ master_id }}-reboot-needed-grain
 
 {% endfor %}
 
 {%- set workers = salt.saltutil.runner('mine.get', tgt='G@roles:kube-minion and G@tx_update_reboot_needed:true', fun='network.ip_addrs', tgt_type='compound') %}
-{%- for worker_id, ip in workers.items() %}
+{%- for worker_id in workers.keys() %}
 
 # Ensure the node is marked as upgrading
 {{ worker_id }}-set-update-grain:
@@ -118,6 +144,20 @@ update_modules:
     - arg:
       - update_in_progress
       - true
+    - require:
+      # wait until all the masters have been updated
+{%- for master_id in masters.keys() %}
+      - salt: {{ master_id }}-remove-update-grain
+{% endfor %}
+
+# Perform any migrations necessary before shutting down services
+{{ worker_id }}-pre-shutdown:
+  salt.state:
+    - tgt: {{ worker_id }}
+    - sls:
+      - cni.update-pre-shutdown
+    - require:
+      - salt: {{ worker_id }}-set-update-grain
 
 # Call the node clean shutdown script
 {{ worker_id }}-clean-shutdown:
@@ -125,12 +165,20 @@ update_modules:
     - tgt: {{ worker_id }}
     - sls:
       - kubelet.stop
-      - kube-proxy.stop      
+      - kube-proxy.stop
       - docker.stop
-      - flannel.stop
       - etcd.stop
     - require:
-      - salt: {{ worker_id }}-set-update-grain
+      - salt: {{ worker_id }}-pre-shutdown
+
+# Perform any migrations necessary before rebooting
+{{ worker_id }}-pre-reboot:
+  salt.state:
+    - tgt: {{ worker_id }}
+    - sls:
+      - cni.update-pre-reboot
+    - require:
+      - salt: {{ worker_id }}-clean-shutdown
 
 # Reboot the node
 {{ worker_id }}-reboot:
@@ -142,7 +190,7 @@ update_modules:
     - kwarg:
         bg: True
     - require:
-      - salt: {{ worker_id }}-clean-shutdown
+      - salt: {{ worker_id }}-pre-reboot
 
 # Wait for it to start again
 {{ worker_id }}-wait-for-start:
@@ -162,6 +210,15 @@ update_modules:
     - require:
       - salt: {{ worker_id }}-wait-for-start
 
+# Perform any migratrions after services are started
+{{ worker_id }}-update-post-start-services:
+  salt.state:
+    - tgt: {{ worker_id }}
+    - sls:
+      - cni.update-post-start-services
+    - require:
+      - salt: {{ worker_id }}-start-services
+
 {{ worker_id }}-update-reboot-needed-grain:
   salt.function:
     - tgt: {{ worker_id }}
@@ -170,7 +227,7 @@ update_modules:
       - tx_update_reboot_needed
       - false
     - require:
-      - salt: {{ worker_id }}-start-services
+      - salt: {{ worker_id }}-update-post-start-services
 
 # Ensure the node is marked as finished upgrading
 {{ worker_id }}-remove-update-grain:
@@ -184,3 +241,20 @@ update_modules:
       - salt: {{ worker_id }}-update-reboot-needed-grain
 
 {% endfor %}
+
+# (re-)apply all the manifests
+# this will perform a rolling-update for existing daemonsets
+apply_manifests:
+  salt.state:
+    - tgt: 'roles:kube-master'
+    - tgt_type: grain
+    - batch: 1
+    - sls:
+      - addons
+      - cni
+    - require:
+    # wait until all the machines in the cluster have been upgraded
+{%- for worker_id in workers.keys() %}
+      - salt: {{ worker_id }}-remove-update-grain
+{% endfor %}
+

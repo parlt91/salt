@@ -18,7 +18,6 @@ base:
     - users
     - cert
     - etcd
-    - flannel
     - docker
     - container-feeder
     - kubectl-config
@@ -29,5 +28,4 @@ base:
     - kube-apiserver
     - kube-controller-manager
     - kube-scheduler
-    - addons
     - dex

@@ -90,6 +90,7 @@ etcd_discovery_setup:
   salt.state:
     - tgt: 'roles:kube-master'
     - tgt_type: grain
+    - batch: 1
     - sls:
       - etcd-discovery
     - require:
@@ -110,16 +111,6 @@ etcd_setup:
     - require:
       - salt: etcd_discovery_setup
 
-flannel_setup:
-  salt.state:
-    - tgt: 'roles:kube-master'
-    - tgt_type: grain
-    - batch: 5
-    - sls:
-      - flannel-setup
-    - require:
-      - salt: etcd_setup
-
 admin_setup:
   salt.state:
     - tgt: 'roles:admin'
@@ -127,7 +118,7 @@ admin_setup:
     - highstate: True
     - batch: 5
     - require:
-      - salt: flannel_setup
+      - salt: etcd_setup
 
 kube_master_setup:
   salt.state:
@@ -147,7 +138,6 @@ kube_minion_setup:
     - highstate: True
     - batch: 5
     - require:
-      - salt: flannel_setup
       - salt: kube_master_setup
 
 reboot_setup:
@@ -159,6 +149,7 @@ reboot_setup:
       - reboot
     - require:
       - salt: kube_master_setup
+      - salt: kube_minion_setup
 
 dex_setup:
   salt.state:
@@ -192,3 +183,16 @@ clear_bootstrap_in_progress_flag:
       - false
     - require:
       - salt: set_bootstrap_complete_flag
+
+# apply manifests, something that could be done even
+# if the cluster was being updated...
+apply_manifests:
+  salt.state:
+    - tgt: 'roles:kube-master'
+    - tgt_type: grain
+    - batch: 1
+    - sls:
+      - addons
+      - cni
+    - require:
+      - salt: clear_bootstrap_in_progress_flag

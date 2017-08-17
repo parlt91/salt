@@ -45,6 +45,11 @@ etcd:
       - iptables: etcd
     - watch:
       - file: /etc/sysconfig/etcd
+#  http.wait_for_successful_query:
+#    - name:       'http://127.0.0.1:2380'
+#    - status:     200
+#    - require:
+#      - service:  etcd
 
 etcd-running:
   service.running:
