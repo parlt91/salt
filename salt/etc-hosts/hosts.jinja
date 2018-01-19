@@ -28,3 +28,9 @@
 {%- for minion_id, ifaces in minions.items() %}
 {{ salt.caasp_net.get_primary_ip(host=minion_id, ifaces=ifaces) }} {{ salt.caasp_net.get_nodename(host=minion_id) }} {{ salt.caasp_net.get_nodename(host=minion_id) }}.{{ pillar['internal_infra_domain'] }} {{ minion_id }} {{ minion_id }}.{{ pillar['internal_infra_domain'] }}
 {%- endfor %}
+
+### other machines in the cluster (ie, etcd nodes, unassigned machines...) ###
+{%- set other = salt['mine.get']('not ( P@roles:(admin|ca) or P@roles:kube-(master|minion) )', 'network.interfaces', 'compound') %}
+{%- for other_id, ifaces in other.items() %}
+{{ salt.caasp_net.get_primary_ip(host=other_id, ifaces=ifaces) }} {{ salt.caasp_net.get_nodename(host=other_id) }} {{ salt.caasp_net.get_nodename(host=other_id) }}.{{ pillar['internal_infra_domain'] }} {{ other_id }} {{ other_id }}.{{ pillar['internal_infra_domain'] }}
+{%- endfor %}
