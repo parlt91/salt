@@ -1,5 +1,5 @@
 {%- set masters = salt.saltutil.runner('mine.get', tgt='G@roles:kube-master', fun='network.interfaces', tgt_type='compound').keys() %}
-{%- set super_master = masters|first %}
+{%- set super_master = masters|sort|first %}
 
 {%- set default_batch = 5 %}
 
