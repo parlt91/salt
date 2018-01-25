@@ -59,7 +59,9 @@ etcd:
                 --cert-file {{ pillar['ssl']['crt_file'] }} \
                 --ca-file {{ pillar['ssl']['ca_file'] }} \
                 --endpoints https://{{ grains['nodename'] }}:2379 \
-                cluster-health | grep "cluster is healthy"
+                cluster-health | grep -q "cluster is healthy" && \
+                echo "changed=no comment='cluster is healthy'"
+    - stateful: True
     - retry:
         attempts: 10
         interval: 4
